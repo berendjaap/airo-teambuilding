@@ -106,6 +106,8 @@ try:  # optional offline text-to-speech
 except Exception:  # pragma: no cover - missing pyttsx3 or audio device
     _tts = None
 
+_voice_ready = threading.Event()
+
 Face = Tuple[int, int, int, int]
 
 
@@ -360,6 +362,41 @@ class ReachyMiniRobot:
             self._boost_wav(path)
             return os.path.exists(path)
         return False
+
+    def preload_voice(self, timeout: float = 20.0) -> bool:
+        """Warm up the OpenAI cloud voice so the first spoken line actually uses it.
+
+        The first request to the OpenAI TTS endpoint after start-up pays the
+        connection/model cold-start cost and can transiently fail, which silently
+        drops the very first utterance to the offline pyttsx3 voice. Synthesising
+        one throwaway clip here (never played) establishes the connection and
+        confirms the cloud path before the robot greets anyone. Retries until
+        ``timeout``. Returns True once the OpenAI voice is ready (or already
+        warmed); False if OpenAI is unavailable or it could not warm up in time.
+        """
+        if _openai is None:
+            return False
+        if _voice_ready.is_set():
+            return True
+        deadline = time.time() + max(0.0, timeout)
+        warm = os.path.join(tempfile.gettempdir(), "reachy_tts_warm.wav")
+        attempt = 0
+        while True:
+            try:
+                r = _openai.audio.speech.create(model="gpt-4o-mini-tts", voice="coral",
+                                                input="Hello.", instructions=_PERSONALITY,
+                                                response_format="wav")
+                r.write_to_file(warm)
+                _voice_ready.set()
+                self.logger.info("OpenAI voice ready")
+                return True
+            except Exception:
+                attempt += 1
+                if time.time() >= deadline:
+                    self.logger.warning("OpenAI voice warm-up timed out; "
+                                        "first line may use the offline voice")
+                    return False
+                time.sleep(min(1.0, 0.25 * attempt))
 
     def record(self, seconds: float = 3.0) -> np.ndarray:
         """Capture mono float32 audio from the mic array (scaffolding for STT)."""

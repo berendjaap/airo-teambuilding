@@ -222,6 +222,9 @@ def run_playbook(robot, stop: "threading.Event", listen_secs: float = 4.0) -> No
     ``robot.set_thinking(True)`` (the operator turns it back off to signal
     'done picking').
     """
+    if hasattr(robot, "preload_voice"):
+        print("Loading the OpenAI voice...")
+        robot.preload_voice(timeout=20.0)
     print("Playbook ready. Lionel will greet and ask what to fetch.")
     while not stop.is_set():
         # --- LISTEN/TALK mode: never while thinking -------------------------
